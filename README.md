@@ -2,6 +2,10 @@
 
 A Python-based web scraper that crawls Facebook groups for rental listing posts, extracts structured information (price, rooms, etc.), and stores the data in a SQLite database. Built with stealth capabilities to avoid detection.
 
+## 💡 Motivation
+
+I was searching for a vegetarian male flatmate replacement in Hyderabad. Facebook groups had thousands of posts, but filtering through them manually wasted hours of research time. This tool automates the tedious process of extracting rental prices, room counts, and other details from unstructured post text.
+
 ## ⚠️ Why I Left This Project
 
 **The Fundamental Problem with Facebook Scraping:**
