@@ -149,7 +149,7 @@ class ManagedAPIFacebookCrawler:
         self,
         api_key: str,
         db_manager: DatabaseStorageManager,
-        endpoint: str = "https://api.brightdata.com/datasets/v3/scrape",
+        endpoint: str = "https://api.brightdata.com/datasets/v3/trigger",
         dataset_id: str | None = None,
         poll_interval: float = 10.0,
         max_wait: float = 600.0,
@@ -163,10 +163,7 @@ class ManagedAPIFacebookCrawler:
         self.dataset_id = dataset_id or os.getenv("SCRAPER_DATASET_ID")
         if not self.dataset_id:
             raise ValueError("SCRAPER_DATASET_ID must be set")
-        # Include dataset_id and flags in the URL query params
-        self.endpoint = (
-            f"{endpoint}?dataset_id={self.dataset_id}&notify=false&include_errors=true"
-        )
+        self.endpoint = endpoint
         logging.debug(
             "[crawler:init] endpoint=%s dataset_id=%s api_key=present",
             endpoint,
@@ -242,7 +239,14 @@ class ManagedAPIFacebookCrawler:
         logging.info(
             "[stage 1/5] Starting fetch: group_url=%s limit=%d", group_url, limit
         )
-        payload = {"input": [{"url": group_url, "num_of_posts": limit}]}
+        payload = [{"url": group_url}]
+        params = {
+            "dataset_id": self.dataset_id,
+            "limit_per_input": limit,
+            "notify": "false",
+            "include_errors": "true",
+            "format": "json",
+        }
         headers = {
             "Authorization": f"Bearer {self.api_key}",
             "Content-Type": "application/json",
@@ -251,7 +255,7 @@ class ManagedAPIFacebookCrawler:
         try:
             async with httpx.AsyncClient(timeout=120.0) as client:
                 response = await client.post(
-                    self.endpoint, headers=headers, json=payload
+                    self.endpoint, headers=headers, params=params, json=payload
                 )
         except httpx.TimeoutException:
             logging.exception("[stage 2/5] API request timed out after 120 seconds")
@@ -272,23 +276,21 @@ class ManagedAPIFacebookCrawler:
             )
             response.raise_for_status()
         response_payload = response.json()
-        async with httpx.AsyncClient(timeout=120.0) as client:
-            if response.status_code == httpx.codes.ACCEPTED:
-                snapshot_id = response_payload.get("snapshot_id")
-                if not snapshot_id:
-                    raise RuntimeError("Async API response did not include snapshot_id")
-                logging.warning(
-                    "[stage 3/6] API accepted snapshot_id=%s; waiting for completion",
-                    snapshot_id,
-                )
-                records = await self._wait_for_snapshot(client, snapshot_id, headers)
-            else:
-                records = response_payload
-
-        if response.status_code == httpx.codes.ACCEPTED:
-            logging.warning(
-                "[stage 4/6] Async snapshot downloaded; continuing with record parsing"
+        if not isinstance(response_payload, dict):
+            raise TypeError(
+                f"Expected trigger response object, received {type(response_payload).__name__}"
             )
+        async with httpx.AsyncClient(timeout=120.0) as client:
+            snapshot_id = response_payload.get("snapshot_id")
+            if not snapshot_id:
+                raise RuntimeError(
+                    f"Trigger response did not include snapshot_id: {response_payload}"
+                )
+            logging.info(
+                "[stage 3/6] Trigger accepted snapshot_id=%s; waiting for completion",
+                snapshot_id,
+            )
+            records = await self._wait_for_snapshot(client, str(snapshot_id), headers)
         if isinstance(records, dict):
             records = self._records(records)
         if not isinstance(records, list):
